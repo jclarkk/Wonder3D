@@ -183,25 +183,25 @@ class Runner:
                 if feasible('inside_sphere'):
                     normals = normals * render_out['inside_sphere'][..., None]
                 normals = normals.sum(dim=1)
-                
+
                 # pdb.set_trace()
                 normal_errors = 1 - F.cosine_similarity(normals, true_normal, dim=1)
                 # normal_error = normal_error * mask[:, 0]
                 # normal_loss = F.l1_loss(normal_error, torch.zeros_like(normal_error), reduction='sum') / mask_sum
                 normal_errors = normal_errors * torch.exp(cosines.abs()[:, 0]) / torch.exp(cosines.abs()).sum()
                 normal_loss = ranking_loss(normal_errors[mask[:, 0]> 0], penalize_ratio=0.9, type='sum')
-                
+
                 sparse_loss = render_out['sparse_loss']
 
                 loss = color_fine_loss * self.color_weight +\
                     eikonal_loss * self.igr_weight + sparse_loss * self.sparse_weight +\
-                    mask_loss * self.mask_weight + normal_loss * self.normal_weight 
+                    mask_loss * self.mask_weight + normal_loss * self.normal_weight
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
 
-            
+
                 self.writer.add_scalar('Loss/loss', loss, self.iter_step)
                 self.writer.add_scalar('Loss/color_loss', color_fine_loss, self.iter_step)
                 self.writer.add_scalar('Loss/eikonal_loss', eikonal_loss, self.iter_step)
@@ -265,7 +265,7 @@ class Runner:
         for dir_name in dir_lis:
             cur_dir = os.path.join(self.base_exp_dir, 'recording', dir_name)
             os.makedirs(cur_dir, exist_ok=True)
-            files = os.listdir(dir_name) 
+            files = os.listdir(dir_name)
             for f_name in files:
                 if f_name[-3:] == '.py':
                     copyfile(os.path.join(dir_name, f_name), os.path.join(cur_dir, f_name))
@@ -336,16 +336,16 @@ class Runner:
                     normals = normals * render_out['inside_sphere'][..., None]
                 normals = normals.sum(dim=1).detach().cpu().numpy()
                 out_normal_fine.append(normals)
-            
+
             if feasible('weight_sum'):
                 out_mask.append(render_out['weight_sum'].detach().clip(0, 1).cpu().numpy())
-            
+
             del render_out
 
         img_fine = None
         if len(out_rgb_fine) > 0:
             img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3, -1]) * 256).clip(0, 255)
-            
+
         mask_map = None
         if len(out_mask) > 0:
             mask_map = (np.concatenate(out_mask, axis=0).reshape([H, W, -1]) * 256).clip(0, 255)
@@ -379,7 +379,7 @@ class Runner:
                                         'normals',
                                         '{:0>8d}_{}_{}_mask.png'.format(self.iter_step, i, idx)),
                            mask_map[...,i])
-                
+
     def save_maps(self, idx, img_idx, resolution_level=1):
         view_types = ['front', 'back', 'left', 'right']
         print('Validate: iter: {}, camera: {}'.format(self.iter_step, idx))
@@ -416,16 +416,16 @@ class Runner:
                     normals = normals * render_out['inside_sphere'][..., None]
                 normals = normals.sum(dim=1).detach().cpu().numpy()
                 out_normal_fine.append(normals)
-            
+
             if feasible('weight_sum'):
                 out_mask.append(render_out['weight_sum'].detach().clip(0, 1).cpu().numpy())
-            
+
             del render_out
 
         img_fine = None
         if len(out_rgb_fine) > 0:
             img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3]) * 256).clip(0, 255)
-            
+
         mask_map = None
         if len(out_mask) > 0:
             mask_map = (np.concatenate(out_mask, axis=0).reshape([H, W, 1]) * 256).clip(0, 255)
@@ -439,7 +439,7 @@ class Runner:
         os.makedirs(os.path.join(self.base_exp_dir, 'coarse_maps'), exist_ok=True)
         img_rgba = np.concatenate([img_fine[:, :, ::-1], mask_map], axis=-1)
         normal_rgba = np.concatenate([world_normal_img[:, :, ::-1], mask_map], axis=-1)
-        
+
         cv.imwrite(os.path.join(self.base_exp_dir, 'coarse_maps', "normals_mlp_%03d_%s.png" % (img_idx, view_types[idx])), img_rgba)
         cv.imwrite(os.path.join(self.base_exp_dir, 'coarse_maps', "normals_grad_%03d_%s.png" % (img_idx, view_types[idx])), normal_rgba)
 
@@ -473,7 +473,7 @@ class Runner:
         img_fine = (np.concatenate(out_rgb_fine, axis=0).reshape([H, W, 3]) * 256).clip(0, 255).astype(np.uint8)
         return img_fine
 
-    def validate_mesh(self, world_space=False, resolution=64, threshold=0.0):
+    def validate_mesh(self, world_space=False, resolution=64, threshold=0.0, name=None):
         bound_min = torch.tensor(self.dataset.object_bbox_min, dtype=torch.float32)
         bound_max = torch.tensor(self.dataset.object_bbox_max, dtype=torch.float32)
 
@@ -485,7 +485,11 @@ class Runner:
             vertices = vertices * self.dataset.scale_mats_np[0][0, 0] + self.dataset.scale_mats_np[0][:3, 3][None]
 
         mesh = trimesh.Trimesh(vertices, triangles, vertex_colors=vertex_colors)
-        mesh.export(os.path.join(self.base_exp_dir, 'meshes', '{:0>8d}.ply'.format(self.iter_step)))
+        mesh.export(os.path.join(
+            self.base_exp_dir,
+            'meshes',
+            ('{:0>8d}.ply'.format(self.iter_step)) if name is None else f'{name}.ply'
+        ))
 
         logging.info('End')
 
@@ -527,6 +531,7 @@ if __name__ == '__main__':
     parser.add_argument('--conf', type=str, default='./confs/base.conf')
     parser.add_argument('--mode', type=str, default='train')
     parser.add_argument('--mcube_threshold', type=float, default=0.0)
+    parser.add_argument('--mcube_res', type=int, default=256)
     parser.add_argument('--is_continue', default=False, action="store_true")
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--case', type=str, default='')
@@ -539,7 +544,7 @@ if __name__ == '__main__':
 
     if args.mode == 'train':
         runner.train()
-        runner.validate_mesh(world_space=False, resolution=256, threshold=args.mcube_threshold)
+        runner.validate_mesh(world_space=False, resolution=args.mcube_res, threshold=args.mcube_threshold, name='mesh')
     elif args.mode == 'save_maps':
         for i in range(4):
             runner.save_maps(idx=i, img_idx=runner.dataset.object_viewidx)
