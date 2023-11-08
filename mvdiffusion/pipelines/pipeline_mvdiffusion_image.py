@@ -438,14 +438,19 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # expand the latents if we are doing classifier free guidance
-                latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-                latent_model_input = torch.cat([
-                    latent_model_input, image_latents
-                ], dim=1)
-                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                # latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+                # latent_model_input = torch.cat([
+                #     latent_model_input, image_latents
+                # ], dim=1)
+                # latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                noise = torch.randn_like(latents)
+
+                latents_noisy = self.scheduler.add_noise(latents, noise, t)
+                latent_model_input = torch.cat([latents_noisy] * 3)
+                tt = torch.cat([t] * 3)
 
                 # Use noise free score distillation from https://github.com/orenkatzir/nfsd
-                noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=image_embeddings, class_labels=camera_embeddings).sample
+                noise_pred = self.unet(latent_model_input, tt, encoder_hidden_states=image_embeddings, class_labels=camera_embeddings).sample
 
                 # perform guidance
                 if do_classifier_free_guidance:
