@@ -154,7 +154,7 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
             # Here we concatenate the unconditional and text embeddings into a single batch
             # to avoid doing two forward passes
             image_embeddings = torch.cat([negative_prompt_embeds, image_embeddings])
-
+        
         image_pt = torch.stack([TF.to_tensor(img) for img in image_pil], dim=0).to(device).to(dtype)
         image_pt = image_pt * 2.0 - 1.0
         image_latents = self.vae.encode(image_pt).latent_dist.mode() * self.vae.config.scaling_factor
@@ -268,18 +268,18 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
             assert self.unet.config.projection_class_embeddings_input_dim == 6 or self.unet.config.projection_class_embeddings_input_dim == 10
         else:
             raise NotImplementedError
-
+        
         # Note: repeat differently from official pipelines
         # B1B2B3B4 -> B1B2B3B4B1B2B3B4        
-        camera_embedding = camera_embedding.repeat(num_images_per_prompt, 1)
+        camera_embedding = camera_embedding.repeat(num_images_per_prompt, 1)     
 
         if do_classifier_free_guidance:
             camera_embedding = torch.cat([
                 camera_embedding,
                 camera_embedding
             ], dim=0)
-
-        return camera_embedding
+        
+        return camera_embedding    
 
     @torch.no_grad()
     def __call__(
@@ -287,7 +287,7 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
         image: Union[List[PIL.Image.Image], torch.FloatTensor],
         # elevation_cond: torch.FloatTensor,
         # elevation: torch.FloatTensor,
-        # azimuth: torch.FloatTensor,
+        # azimuth: torch.FloatTensor, 
         camera_embedding: torch.FloatTensor,
         height: Optional[int] = None,
         width: Optional[int] = None,
@@ -429,29 +429,37 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
             generator,
             latents,
         )
-
+        
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
-        # 7. Denoising
-        t = torch.randint(0, 1, (latents.shape[0],), dtype=torch.long, device=self.device)
+        # 7. Denoising loop
+        num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
+        with self.progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                # expand the latents if we are doing classifier free guidance
+                latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+                latent_model_input = torch.cat([
+                    latent_model_input, image_latents
+                ], dim=1)
+                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-        noise = torch.randn_like(latents)
-        latents_noisy = self.scheduler.add_noise(latents, noise, t)
-        latent_model_input = torch.cat([latents_noisy] * 3)
-        tt = torch.cat([t] * 3)
-        noise_pred = self.unet(latent_model_input, tt, encoder_hidden_states=image_embeddings, class_labels=camera_embeddings).sample
-        noise_pred_uncond, noise_pred_y, noise_pred_neg = noise_pred.chunk(3)
-        noise_pred = (noise_pred_y - noise_pred_uncond) * guidance_scale  # delta_c
+                # predict the noise residual
+                noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=image_embeddings, class_labels=camera_embeddings).sample
 
-        if t < 200:  # delta_d
-            # epsilon(zt,none,t)
-            noise_pred += noise_pred_uncond
-        else:
-            # epsilon(zt,none,t)-epsilon(zt,neg,t)
-            noise_pred += (noise_pred_uncond - noise_pred_neg)
+                # perform guidance
+                if do_classifier_free_guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-        latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
+                # compute the previous noisy sample x_t -> x_t-1
+                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
+
+                # call the callback, if provided
+                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                    progress_bar.update()
+                    if callback is not None and i % callback_steps == 0:
+                        callback(i, t, latents)
 
         if not output_type == "latent":
             if num_channels_latents == 8:
@@ -474,4 +482,4 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
             return (image, has_nsfw_concept)
 
         return StableDiffusionPipelineOutput(images=image, nsfw_content_detected=has_nsfw_concept)
-
+    
