@@ -440,7 +440,7 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
         latents_noisy = self.scheduler.add_noise(latents, noise, t)
         latent_model_input = torch.cat([latents_noisy] * 3)
         tt = torch.cat([t] * 3)
-        noise_pred = self.unet(latent_model_input, tt, encoder_hidden_states=image_embeddings).sample
+        noise_pred = self.unet(latent_model_input, tt, encoder_hidden_states=image_embeddings, class_labels=camera_embeddings).sample
         noise_pred_uncond, noise_pred_y, noise_pred_neg = noise_pred.chunk(3)
         noise_pred = (noise_pred_y - noise_pred_uncond) * guidance_scale  # delta_c
 
