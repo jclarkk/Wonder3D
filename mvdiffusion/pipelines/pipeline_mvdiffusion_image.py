@@ -154,7 +154,7 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
             # Here we concatenate the unconditional and text embeddings into a single batch
             # to avoid doing two forward passes
             image_embeddings = torch.cat([negative_prompt_embeds, image_embeddings])
-        
+
         image_pt = torch.stack([TF.to_tensor(img) for img in image_pil], dim=0).to(device).to(dtype)
         image_pt = image_pt * 2.0 - 1.0
         image_latents = self.vae.encode(image_pt).latent_dist.mode() * self.vae.config.scaling_factor
@@ -268,18 +268,18 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
             assert self.unet.config.projection_class_embeddings_input_dim == 6 or self.unet.config.projection_class_embeddings_input_dim == 10
         else:
             raise NotImplementedError
-        
+
         # Note: repeat differently from official pipelines
         # B1B2B3B4 -> B1B2B3B4B1B2B3B4        
-        camera_embedding = camera_embedding.repeat(num_images_per_prompt, 1)     
+        camera_embedding = camera_embedding.repeat(num_images_per_prompt, 1)
 
         if do_classifier_free_guidance:
             camera_embedding = torch.cat([
                 camera_embedding,
                 camera_embedding
             ], dim=0)
-        
-        return camera_embedding    
+
+        return camera_embedding
 
     @torch.no_grad()
     def __call__(
@@ -287,7 +287,7 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
         image: Union[List[PIL.Image.Image], torch.FloatTensor],
         # elevation_cond: torch.FloatTensor,
         # elevation: torch.FloatTensor,
-        # azimuth: torch.FloatTensor, 
+        # azimuth: torch.FloatTensor,
         camera_embedding: torch.FloatTensor,
         height: Optional[int] = None,
         width: Optional[int] = None,
@@ -429,7 +429,7 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
             generator,
             latents,
         )
-        
+
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
@@ -445,7 +445,7 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                 # Use noise free score distillation from https://github.com/orenkatzir/nfsd
-                noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=image_embeddings).sample
+                noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=image_embeddings, class_labels=camera_embeddings).sample
 
                 # perform guidance
                 if do_classifier_free_guidance:
@@ -487,4 +487,4 @@ class MVDiffusionImagePipeline(DiffusionPipeline):
             return (image, has_nsfw_concept)
 
         return StableDiffusionPipelineOutput(images=image, nsfw_content_detected=has_nsfw_concept)
-    
+
